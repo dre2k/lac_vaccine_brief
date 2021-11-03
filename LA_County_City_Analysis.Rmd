@@ -14,15 +14,16 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
 library(knitr)
 library(corrplot)
 library(ggplot2)
 library(summarytools)
 library(stargazer)
 library(RColorBrewer)
+library(nnet)
 
-setwd("~/Google Drive/My Drive/Projects/COVID19/LACountyDataReportsApp/Analysis")
-
+# setwd("~/Google Drive/My Drive/Projects/COVID19/LACountyDataReportsApp/Analysis")
 august.date <- "2021-08-18"
 january.date <- "2021-01-07"
 ```
@@ -49,24 +50,27 @@ All hypothesis are on the city-level and care must be taken when interpreting th
 
 1. How do race/ethnicity, age, and income describe variation in incidence rates? 
 
-2. Conditioning on race/ethnicity, age, and income, do August vaccination rates (for `r august.date`) capture any variation in incidence rates during the December 2020-January 2021 peak for COVID 19? 
-
 **Investigation of the August 2021 peak for COVID 19 captured by a single day for incidence rates: `r august.date`:**
 
-3. How do August vaccination proportions, race/ethnicity, age, income, and incidence rates for the Dec.-Jan. peak describe variation in incidence rates during the August peak for COVID 19?
+2. How do August vaccination proportions, race/ethnicity, age, income, and incidence rates for the Dec.-Jan. peak describe variation in incidence rates during the August peak for COVID 19?
 
+**Investigation of August 2021 vaccination rates for COVID 19 captured by a single day for vaccination rates: `r august.date`:**
+
+3. How do race/ethnicity, age, income, and incidence rates for the Dec.-Jan. peak describe variation in August vaccination rates?
 
 ```{r Input and Merge Data, include=F}
-d.vax <- read.table("covid_vaccine_percent_by_city.csv", header=T, sep=",")
+# d.vax <- read.table("data/covid_vaccine_percent_by_city.csv", header=T, sep=",")
+d.vax <- read.table("data/LAC_Vaccine_City_Data.csv", header=T, sep=",") %>% 
+  mutate()
 d.vax.aug <- d.vax[d.vax$Date==august.date,]
 
-d.ir <- read.table("covid_aair_by_city.csv", header=T, sep=",")
+d.ir <- read.table("data/covid_aair_by_city.csv", header=T, sep=",")
 d.ir.jan <- d.ir[d.ir$Date==january.date,]
 d.ir.aug <- d.ir[d.ir$Date==august.date,]
 
-d.race <- read.table("almanac_race_by_city.csv", header=T, sep=",")
-d.age <- read.table("almanac_age_group_by_city.csv", header=T, sep=",")
-d.income <- read.table("city_income.csv", header=T, sep=",")
+d.race <- read.table("data/almanac_race_by_city.csv", header=T, sep=",")
+d.age <- read.table("data/almanac_age_group_by_city.csv", header=T, sep=",")
+d.income <- read.table("data/city_income.csv", header=T, sep=",")
 d.income$city <- unlist(lapply(d.income$city, FUN=function(v) { strsplit(v, "†") }))
 
 d.ir.m <- merge(d.ir.jan, d.ir.aug, by="city", all=F)
@@ -202,10 +206,10 @@ abline(v=quantile(HouseholdIncome, probs=c(.25, .5, .75)), lwd=2, lty=2)
 ```{r distributions }
 CityAge.m <- cbind(CityAgeOld.cat, CityAgeYoung.cat)
 CityRaceEthnicty.m <- cbind(CityHispanic.cat, CityBlack.cat, CityAsian.cat)
-d.analysis <- data.frame(Aug.IR, Jan.IR.cat, Aug.Vax.cat, CityRaceEthnicty.m, CityAge.m, HouseholdIncome.cat)
+d.analysis <- data.frame(Aug.IR, Jan.IR.cat, Aug.Vax.cat, Aug.Vax.percent, CityRaceEthnicty.m, CityAge.m, HouseholdIncome.cat)
 
 summarytools::view(dfSummary(d.analysis, style = 'grid',
-                               max.distinct.values = 10, plain.ascii =   FALSE, valid.col = FALSE, headings = FALSE), method = "render")
+                               max.distinct.values = 10, plain.ascii = FALSE, valid.col = FALSE, headings = FALSE), method = "render")
 
 ```
 
@@ -227,26 +231,17 @@ corrplot(cormat, type="upper", order="original",
 
 
 # Pairwise Trend Plots {.tabset}
-## August IR vs. January IR
-```{r aug.ir vs. jan.ir }
-coef <- summary(lm(Aug.IR~Jan.IR))$coef
-ggplot(d.analysis, aes(x=Jan.IR, y=Aug.IR)) +
+## January IR vs. Proportion of Hispanic Individuals
+```{r jan.ir vs. proportion of hispanic individuals } 
+CityHispanic.cont <- as.numeric(relevel(CityHispanic.cat, "Low"))
+coef <- summary(lm(Jan.IR~CityHispanic.cont))$coef
+ggplot(d.analysis, aes(x=CityHispanic.cont, y=Jan.IR)) +
   geom_point(color="blue", size=2) +
   geom_smooth(method=lm, color="black") +
-  geom_text(x=3000, y=900, label=paste(expression(beta), "=", round(coef[2,1],2))) +
-  geom_text(x=3000, y=800, label=paste("p-value", "=", round(coef[2,4],6)))+
-  xlab("January Incidence Rates")+ylab("August Incidence Rates")
-```
-
-## August IR vs. August Percent Vaccinated
-```{r aug.ir vs. aug vaccination percent } 
-coef <- summary(lm(Aug.IR~Aug.Vax.percent))$coef
-ggplot(d.analysis, aes(x=Aug.Vax.percent, y=Aug.IR)) +
-  geom_point(color="blue", size=2) +
-  geom_smooth(method=lm, color="black") +
-  geom_text(x=80, y=900, label=paste(expression(beta), "=", round(coef[2,1],2))) +
-  geom_text(x=80, y=800, label=paste("p-value", "=", round(coef[2,4],2)))+
-  xlab("August Vaccination Percent")+ylab("August Incidence Rates")
+  geom_text(x=2.5, y=3000, label=paste(expression(beta), "=", round(coef[2,1],2))) +
+  geom_text(x=2.5, y=2500, label=paste("p-value", "=", round(coef[2,4],25))) +
+  scale_x_continuous(name ="Proportion of Hispanic Individuals", breaks=c(1,2,3), labels=c("Low", "Med", "High"))+
+  ylab("Jan Incidence Rates")
 ```
 
 ## January IR vs. Household Income
@@ -261,17 +256,54 @@ ggplot(d.analysis, aes(x=as.numeric(relevel(HouseholdIncome.cat, "Low")), y=Jan.
   ylab("January Incidence Rates")
 ```
 
+## August IR vs. January IR
+```{r aug.ir vs. jan.ir }
+coef <- summary(lm(Aug.IR~Jan.IR))$coef
+ggplot(d.analysis, aes(x=Jan.IR, y=Aug.IR)) +
+  geom_point(color="blue", size=2) +
+  geom_smooth(method=lm, color="black") +
+  geom_text(x=3000, y=900, label=paste(expression(beta), "=", round(coef[2,1],2))) +
+  geom_text(x=3000, y=800, label=paste("p-value", "=", round(coef[2,4],6)))+
+  xlab("January Incidence Rates")+ylab("August Incidence Rates")
+```
+
+## August IR vs. Proportion of Hispanic Individuals
+```{r aug.ir vs. proportion of hispanic individuals } 
+CityHispanic.cont <- as.numeric(relevel(CityHispanic.cat, "Low"))
+coef <- summary(lm(Aug.IR~CityHispanic.cont))$coef
+ggplot(d.analysis, aes(x=CityHispanic.cont, y=Aug.IR)) +
+  geom_point(color="blue", size=2) +
+  geom_smooth(method=lm, color="black") +
+  geom_text(x=2.5, y=900, label=paste(expression(beta), "=", round(coef[2,1],2))) +
+  geom_text(x=2.5, y=800, label=paste("p-value", "=", round(coef[2,4],2))) +
+  scale_x_continuous(name ="Proportion of Hispanic Individuals", breaks=c(1,2,3), labels=c("Low", "Med", "High"))+
+  ylab("August Incidence Rates")
+```
+
+
 ## August IR vs. Household Income
 ```{r aug.ir vs. household income } 
 coef <- summary(lm(Aug.IR~as.numeric(relevel(HouseholdIncome.cat, "Low"))))$coef
 ggplot(d.analysis, aes(x=as.numeric(relevel(HouseholdIncome.cat, "Low")), y=Aug.IR)) +
   geom_point(color="blue", size=2) +
   geom_smooth(method=lm, color="black") +
-  geom_text(x=2.5, y=3000, label=paste(expression(beta), "=", round(coef[2,1],2))) +
-  geom_text(x=2.5, y=2500, label=paste("p-value", "=", round(coef[2,4],23))) +
+  geom_text(x=2.5, y=900, label=paste(expression(beta), "=", round(coef[2,1],2))) +
+  geom_text(x=2.5, y=800, label=paste("p-value", "=", round(coef[2,4],2))) +
   scale_x_continuous(name ="Household Income", breaks=c(1,2,3), labels=c("Low", "Med", "High"))+
   ylab("August Incidence Rates")
 ```
+
+## August IR vs. August Percent Vaccinated
+```{r aug.ir vs. aug vaccination percent } 
+coef <- summary(lm(Aug.IR~Aug.Vax.percent))$coef
+ggplot(d.analysis, aes(x=Aug.Vax.percent, y=Aug.IR)) +
+  geom_point(color="blue", size=2) +
+  geom_smooth(method=lm, color="black") +
+  geom_text(x=80, y=900, label=paste(expression(beta), "=", round(coef[2,1],2))) +
+  geom_text(x=80, y=800, label=paste("p-value", "=", round(coef[2,4],2)))+
+  xlab("August Vaccination Percent")+ylab("August Incidence Rates")
+```
+
 
 # January Incident Rates: {.tabset}
 ## Regression Model {.tabset}
@@ -287,38 +319,108 @@ kable(summary(reg.Jan.noVax)$coef, digits=3, format = "simple", align = 'c', cap
 ```
 
 ### Regression ANOVA
+$R^2 =$ `r round(summary(reg.Jan.noVax)$r.squared,2)`
 ```{r jan.ir regression: anova }
 kable(anova(reg.Jan.noVax), digits=3, format = "simple", align = 'c', caption = "January Regression ANOVA")
 ```
 
-## Regression Model with August Vaccination {.tabset}
-```{r jan.ir regression with vaccination}
-reg.Jan <- lm(Jan.IR ~ Aug.Vax.cat+HouseholdIncome.cat+CityRaceEthnicty.m+CityAge.m)
-
-```
-
-### Regression summary
-```{r jan.ir regression with vax: summary }
-kable(summary(reg.Jan)$coef, digits=3, format = "simple", align = 'c', caption = "January Regression with Vaccination")
-```
-
-### Regression ANOVA
-```{r jan.ir regression with vax: anova }
-kable(anova(reg.Jan), digits=3, format = "simple", align = 'c', caption = "January Regression with Vaccination ANOVA")
-```
-
 # August Incident Rates: 
-## Regression Model {.tabset}
+## Vaccination Only {.tabset}
+### Regression Model {.tabset}
+```{r aug.ir vax only regression }
+reg.Aug.vax <- lm(Aug.IR ~ Aug.Vax.cat)
+```
+
+#### Regression summary
+```{r aug.ir vax only regression: summary }
+kable(summary(reg.Aug.vax)$coef, digits=3, format = "simple", align = 'c', caption = "August Regression")
+```
+
+#### Regression ANOVA
+$R^2 =$ `r round(summary(reg.Aug.vax)$r.squared,2)`
+```{r aug.ir vax only regression: anova }
+
+kable(anova(reg.Aug.vax), digits=3, format = "simple", align = 'c', caption = "August Regression ANOVA")
+```
+
+
+## Full Model
+### Regression Model {.tabset}
 ```{r aug.ir regression }
 reg.Aug <- lm(Aug.IR ~ Aug.Vax.cat + Jan.IR.cat + HouseholdIncome.cat+CityRaceEthnicty.m+CityAge.m)
 ```
 
-### Regression summary
+#### Regression summary
 ```{r aug.ir regression: summary }
 kable(summary(reg.Aug)$coef, digits=3, format = "simple", align = 'c', caption = "August Regression")
 ```
 
-### Regression ANOVA
+#### Regression ANOVA
+$R^2 =$ `r round(summary(reg.Aug)$r.squared,2)`
 ```{r aug.ir regression: anova }
 kable(anova(reg.Aug), digits=3, format = "simple", align = 'c', caption = "August Regression ANOVA")
 ```
+
+# August Vaccination Rates:
+## Regression Model with August Vaccination {.tabset}
+```{r aug.vax.percent regression}
+reg.Aug.vax <- lm(Aug.Vax.percent ~ Jan.IR.cat+HouseholdIncome.cat+CityRaceEthnicty.m+CityAge.m)
+
+```
+
+### Regression summary
+```{r aug.vax.percent regression: summary }
+kable(summary(reg.Aug.vax)$coef, digits=3, format = "simple", align = 'c', caption = "August Vaccination Regression")
+```
+
+### Regression ANOVA
+```{r aug.vax.percent regression: anova }
+kable(anova(reg.Aug.vax), digits=3, format = "simple", align = 'c', caption = "August Vaccination Regression ANOVA")
+```
+
+## Multnomial Regression Model with August Vaccination {.tabset}
+```{r aug.vax.percent multinomial regression}
+reg.Aug.vax <- lm(Aug.Vax.percent ~ Jan.IR.cat+HouseholdIncome.cat+CityRaceEthnicty.m+CityAge.m)
+reg.Aug.vax <- multinom(Aug.Vax.cat ~ Jan.IR.cat+HouseholdIncome.cat+CityRaceEthnicty.m+CityAge.m)
+
+
+```
+
+### Regression summary for High Vaccination Rates
+```{r aug.vax.percent multinomial regression: high vax summary }
+coef.high <- summary(reg.Aug.vax)$coefficients["High",]
+OR.high <- exp(coef.high)
+se.high <- summary(reg.Aug.vax)$standard.errors["High",]
+z.high <- coef.high/se.high
+p.value.high <- (1 - pnorm(abs(z.high), 0, 1)) * 2
+r.high <- data.frame(OR.high, coef.high, se.high, z.high, p.value.high)
+kable(r.high, digits=3, format = "simple", align = 'c', caption = "August Vaccination Regression for High Vax Rates")
+```
+
+### Regression summary for Low Vaccination Rates
+```{r aug.vax.percent multinomial regression: low vax summary }
+coef.low <- summary(reg.Aug.vax)$coefficients["Low",]
+OR.low <- exp(coef.low)
+se.low <- summary(reg.Aug.vax)$standard.errors["Low",]
+z.low <- coef.low/se.low
+p.value.low <- (1 - pnorm(abs(z.low), 0, 1)) * 2
+r.low <- data.frame(OR.low, coef.low, se.low, z.low, p.value.low)
+kable(r.low, digits=3, format = "simple", align = 'c', caption = "August Vaccination Regression for Low Vax Rates")
+```
+
+
+<!-- <br> -->
+
+<!-- --- -->
+
+<!-- <br> -->
+
+<!-- ## Full model parameter estimates over time {.tabset} -->
+
+<!-- In models, vaccination rates are lagged 14 days in relation to the Covid incidence rate (e.g. models for 2021/10/15 includes IR from 10/15 but vaccination rates from 10/01)  -->
+
+<!-- ### Household income -->
+<!-- ![] -->
+
+<!-- ### Race -->
+<!-- ![] -->
