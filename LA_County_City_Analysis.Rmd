@@ -22,6 +22,8 @@ library(summarytools)
 library(stargazer)
 library(RColorBrewer)
 library(nnet)
+library(lubridate)
+library(cowplot)
 
 # setwd("~/Google Drive/My Drive/Projects/COVID19/LACountyDataReportsApp/Analysis")
 august.date <- "2021-08-18"
@@ -59,22 +61,25 @@ All hypothesis are on the city-level and care must be taken when interpreting th
 3. How do race/ethnicity, age, income, and incidence rates for the Dec.-Jan. peak describe variation in August vaccination rates?
 
 ```{r Input and Merge Data, include=F}
-# d.vax <- read.table("data/covid_vaccine_percent_by_city.csv", header=T, sep=",")
-d.vax <- read.table("data/LAC_Vaccine_City_Data.csv", header=T, sep=",") %>% 
-  mutate()
-d.vax.aug <- d.vax[d.vax$Date==august.date,]
 
-d.ir <- read.table("data/covid_aair_by_city.csv", header=T, sep=",")
-d.ir.jan <- d.ir[d.ir$Date==january.date,]
-d.ir.aug <- d.ir[d.ir$Date==august.date,]
+tmp_data <- readRDS("data/analysis_data.rds")
+
+# d.vax <- read.table("data/covid_vaccine_percent_by_city.csv", header=T, sep=",")
+d.vax <- read.table("data/LAC_Vaccine_City_Data_Clean.csv", header=T, sep=",")
+d.vax.aug <- tmp_data[tmp_data$Date.x==august.date, c('city', 'dose1_all_c_prcent')]
+
+# d.ir <- read.table("data/covid_aair_by_city.csv", header=T, sep=",")
+d.ir <- tmp_data
+d.ir.jan <- d.ir[d.ir$Date.x==january.date,]
+d.ir.aug <- d.ir[d.ir$Date.x==august.date,]
 
 d.race <- read.table("data/almanac_race_by_city.csv", header=T, sep=",")
 d.age <- read.table("data/almanac_age_group_by_city.csv", header=T, sep=",")
 d.income <- read.table("data/city_income.csv", header=T, sep=",")
 d.income$city <- unlist(lapply(d.income$city, FUN=function(v) { strsplit(v, "†") }))
 
-d.ir.m <- merge(d.ir.jan, d.ir.aug, by="city", all=F)
-d <- merge(d.ir.m, d.vax.aug, by="city", all=F)
+# d.ir.m <- merge(d.ir.aug, d.ir.jan[, c('city', ')], by="city", all=F)
+d <- merge(d.ir, d.vax.aug, by="city", all=F)
 d <- merge(d, d.race, by="city", all=F)
 d <- merge(d, d.age, by="city", all=F)
 d <- merge(d, d.income, by="city", all=F)
@@ -84,6 +89,10 @@ d <- merge(d, d.income, by="city", all=F)
 # Variable Distributions and Coding {.tabset}
 ## Cities
 ```{r cities table }
+d <- readRDS("data/analysis_data.rds") %>% 
+  arrange(Date.x) %>% 
+  filter(Date.x == "2021-08-18")
+
 city.populations <- data.frame(d$city, d$population.x)
 names(city.populations) <- c("City", "Population_Size")
 city.populations <- city.populations[order(city.populations$Population_Size, decreasing=T), ]
@@ -96,7 +105,7 @@ City <- d$city
 ## Incidence Rates {.tabset}
 ### January Peak: 2021-01-07
 ```{r january peak ir }
-Jan.IR <- d$adj_case_14day_rate.x
+Jan.IR <- d$adj_case_14day_rate.y
 Jan.IR.cat <- relevel(as.factor(ifelse(Jan.IR > quantile(Jan.IR, probs=.75), "High",
                       ifelse(Jan.IR < quantile(Jan.IR, probs=.25), "Low",
                              "Med"))), ref="Med")
@@ -108,7 +117,7 @@ abline(v=quantile(Jan.IR, probs=c(.25, .5, .75)), lwd=2, lty=2)
 
 ### August Peak: 2021-08-18
 ```{r august peak ir }
-Aug.IR <- d$adj_case_14day_rate.y
+Aug.IR <- d$adj_case_14day_rate.x
 
 hist(Aug.IR, breaks=seq(from=0, to=round(max(Aug.IR),-2), by=100), col="red", main="August Incidence Rates for Cities", xlab="Incidence Rates")
 
@@ -116,7 +125,7 @@ hist(Aug.IR, breaks=seq(from=0, to=round(max(Aug.IR),-2), by=100), col="red", ma
 
 ## Percent Vaccinated in Each City
 ```{r percent vaccinated }
-Aug.Vax.percent <- as.numeric(unlist(strsplit(d$dose1_all_c_prcent, "%")))
+Aug.Vax.percent <- d$dose1_all_c_prcent
 Aug.Vax.cat <- relevel(as.factor(ifelse(Aug.Vax.percent > quantile(Aug.Vax.percent, probs=.75), "High",
                       ifelse(Aug.Vax.percent < quantile(Aug.Vax.percent, probs=.25), "Low",
                              "Med"))), ref="Med")
@@ -191,8 +200,8 @@ ftable(CityAgeOld.cat, CityAgeYoung.cat)
 ## Household Income
 ```{r household income}
 HouseholdIncome <- d$Households
-HouseholdIncome.cat <- relevel(as.factor(ifelse(d$Households > quantile(d$Households, probs=.75), "High",
-                      ifelse(d$Households < quantile(d$Households, probs=.25), "Low",
+HouseholdIncome.cat <- relevel(as.factor(ifelse(HouseholdIncome > quantile(HouseholdIncome, probs=.75), "High",
+                      ifelse(HouseholdIncome < quantile(HouseholdIncome, probs=.25), "Low",
                              "Med"))), ref="Med")
 
 hist(HouseholdIncome, breaks=seq(from=0, to=round(max(HouseholdIncome),-2), by=10000), main="Household Income Within Each City", xlab="Income", col="green")
@@ -216,10 +225,20 @@ summarytools::view(dfSummary(d.analysis, style = 'grid',
 
 ## Correlation
 ```{r create variables for analysis}
-d.num <- data.frame(Aug.IR, as.numeric(Jan.IR.cat), as.numeric(Aug.Vax.cat),
-                    as.numeric(CityHispanic.cat), as.numeric(CityBlack.cat), as.numeric(CityAsian.cat), 
+
+# need to make sure low is lowest when setting as.numeric (to make cor more clear)
+
+
+
+
+
+d.num <- data.frame(Aug.IR, Jan.IR.cat, Aug.Vax.cat,
+                    CityHispanic.cat, as.numeric(CityBlack.cat), as.numeric(CityAsian.cat), 
                     as.numeric(CityAgeOld.cat), as.numeric(CityAgeYoung.cat),
-                    as.numeric(HouseholdIncome.cat))
+                    HouseholdIncome.cat) %>% 
+  mutate(across(c(Jan.IR.cat, Aug.Vax.cat, CityHispanic.cat, HouseholdIncome.cat), 
+                ~ as.numeric(relevel(.x, ref = "Low"))))
+
 cormat <- cor(d.num, use="complete.obs", method="pearson")
 corrplot(cormat, type="upper", order="original",
           col=brewer.pal(n=8, name="RdYlBu"),
@@ -409,18 +428,287 @@ kable(r.low, digits=3, format = "simple", align = 'c', caption = "August Vaccina
 ```
 
 
-<!-- <br> -->
+<br>
 
-<!-- --- -->
+---
 
-<!-- <br> -->
+<br>
 
-<!-- ## Full model parameter estimates over time {.tabset} -->
+## Model params over time {.tabset}
 
-<!-- In models, vaccination rates are lagged 14 days in relation to the Covid incidence rate (e.g. models for 2021/10/15 includes IR from 10/15 but vaccination rates from 10/01)  -->
+Full model fit by date
+\
+``{r} adj_case_14day_rate.x ~ Vax.percent + Jan.IR.cat + HouseholdIncome.cat+CityHispanic.cat+CityBlack.cat+ CityAsian.cat+ CityAgeOld.cat+ CityAgeYoung.cat`` 
+\
+No vaccination lag time in this example
 
-<!-- ### Household income -->
-<!-- ![] -->
+### Vaccination rates
+Modeled as a continuous variable. Plots include dates > 04/01/2021
+```{r}
 
-<!-- ### Race -->
-<!-- ![] -->
+d <- readRDS("data/analysis_data.rds") 
+lac_summarytable_dash <- read.csv("data/LA_County_Covid19_CSA_14day_case_death_table_Clean.csv")
+
+# data clean ----
+dout <- d %>% 
+  mutate(Date.x = ymd(Date.x), 
+         Vax.percent = dose1_all_c_prcent, 
+         Jan.IR =  as.numeric(adj_case_14day_rate.y),
+         Jan.IR.cat =  relevel(as.factor(ifelse(Jan.IR > quantile(Jan.IR, probs=.75), "High",
+                                                ifelse(Jan.IR < quantile(Jan.IR, probs=.25), "Low",
+                                                       "Med"))), ref="Low")) %>%
+  dplyr::select(Date.x, city, adj_case_14day_rate.x, 
+                Vax.percent, Jan.IR.cat, 
+                HouseholdIncome.cat, CityHispanic.cat, CityBlack.cat, 
+                CityAsian.cat, CityAgeOld.cat, CityAgeYoung.cat)
+
+
+
+
+test <- dout %>% 
+  # dplyr::filter(Date.x > "2021-03-01") %>% 
+  tidyr::nest(data = -Date.x) %>% 
+  dplyr::mutate(fit = purrr::map(data, ~lm(adj_case_14day_rate.x ~ Vax.percent + Jan.IR.cat + HouseholdIncome.cat+CityHispanic.cat+CityBlack.cat+ CityAsian.cat+ CityAgeOld.cat+ CityAgeYoung.cat, data = .x)),
+                tidied = purrr::map(fit, ~broom::tidy(.x), quality = purrr::map(fit, ~glance(.x)))) %>% 
+  dplyr::select(-data, -fit) %>% 
+  tidyr::unnest(tidied) %>% 
+  # dplyr::filter(grepl("Vax", term)) %>%
+  arrange(Date.x)
+
+
+
+# Vaccination rates ---- 
+# after april 2021 (vaccination rates too low prior)
+p1 <- ggplot(test %>% filter(grepl("Vax.percent", term), Date.x > "2021-04-01"), aes(Date.x, estimate)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) +
+  geom_hline(yintercept = 0) + theme_bw() + theme(legend.position = c(0.8, 0.8))
+  # geom_line(data = lac_summarytable_dash %>% filter(city == "Los Angeles County"), aes(Date, adj_case_14day_rate))
+
+p2 <- ggplot(lac_summarytable_dash %>% 
+               filter(city == "Los Angeles County", 
+                      Date > "2021-04-01") %>% 
+               mutate(Date = ymd(Date)), aes(Date, adj_case_14day_rate)) +
+  geom_line()
+
+plot_grid(p1, p2, ncol = 1, align = 'v')
+
+
+```
+
+### Race
+```{r, warning=F}
+
+p1 <- ggplot(test %>% filter(term %in% c("CityAsian.catHigh", "CityBlack.catHigh", "CityHispanic.catHigh")), aes(Date.x, estimate)) + 
+  geom_point(aes(colour = term)) + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error, colour = term)) +
+  geom_hline(yintercept = 0) + theme_bw() + theme(legend.position = c(0.8, 0.8))
+
+p2 <- ggplot(lac_summarytable_dash %>% 
+               filter(city == "Los Angeles County") %>% 
+               mutate(Date = ymd(Date)), aes(Date, adj_case_14day_rate)) +
+  geom_line()
+
+plot_grid(p1, p2, ncol = 1, align = 'v')
+
+```
+
+
+### Household income
+```{r}
+p1 <- ggplot(test %>% filter(term %in% c("HouseholdIncome.catHigh", "HouseholdIncome.catLow")), aes(Date.x, estimate)) + 
+  geom_point(aes(colour = term)) + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error, colour = term)) +
+  geom_hline(yintercept = 0) + theme_bw() + theme(legend.position = c(0.8, 0.2))
+
+p2 <- ggplot(lac_summarytable_dash %>% 
+               filter(city == "Los Angeles County") %>% 
+               mutate(Date = ymd(Date)), aes(Date, adj_case_14day_rate)) +
+  geom_line()
+
+plot_grid(p1, p2, ncol = 1, align = 'v')
+
+```
+
+
+
+### Age category
+```{r}
+p1 <- ggplot(test %>% filter(term %in% c("CityAgeOld.catHigh", "CityAgeYoung.catHigh")), aes(Date.x, estimate)) + 
+  geom_point(aes(colour = term)) + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error, colour = term)) +
+  geom_hline(yintercept = 0) + theme_bw() + theme(legend.position = c(0.8, 0.8))
+
+p2 <- ggplot(lac_summarytable_dash %>% 
+               filter(city == "Los Angeles County") %>% 
+               mutate(Date = ymd(Date)), aes(Date, adj_case_14day_rate)) +
+  geom_line()
+
+plot_grid(p1, p2, ncol = 1, align = 'v')
+
+```
+
+
+### January incidence rates
+```{r}
+
+p1 <- ggplot(test %>% filter(term %in% c("Jan.IR.catHigh", "Jan.IR.catMed")), aes(Date.x, estimate)) + 
+  geom_point(aes(colour = term)) + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error, colour = term)) +
+  geom_hline(yintercept = 0) + theme_bw() + theme(legend.position = c(0.8, 0.8))
+# geom_line(data = lac_summarytable_dash %>% filter(city == "Los Angeles County"), aes(Date, adj_case_14day_rate))
+# ggsave(p1, width = 10, height = 8, file = "~/Desktop/test1.png")
+p2 <- ggplot(lac_summarytable_dash %>% 
+               filter(city == "Los Angeles County") %>% 
+               mutate(Date = ymd(Date)), aes(Date, adj_case_14day_rate)) +
+  geom_line()
+
+plot_grid(p1, p2, ncol = 1, align = 'v')
+
+```
+
+
+
+
+<br>
+
+---
+
+<br>
+
+## Model params over time (vax lag) {.tabset}
+
+Full model fit by date
+\
+``{r} adj_case_14day_rate.x ~ Vax.percent + Jan.IR.cat + HouseholdIncome.cat+CityHispanic.cat+CityBlack.cat+ CityAsian.cat+ CityAgeOld.cat+ CityAgeYoung.cat`` 
+\
+Introduce 14 day lag between vaccination rates and COVID incidence rates
+
+### Vaccination rates
+Modeled as a continuous variable. Plots include dates > 04/01/2021
+```{r}
+
+d <- readRDS("data/analysis_data_14vax_lag.rds") 
+lac_summarytable_dash <- read.csv("data/LA_County_Covid19_CSA_14day_case_death_table_Clean.csv")
+
+# data clean ----
+dout <- d %>% 
+  mutate(Date.x = ymd(Date.x), 
+         Vax.percent = dose1_all_c_prcent, 
+         Jan.IR =  as.numeric(adj_case_14day_rate.y),
+         Jan.IR.cat =  relevel(as.factor(ifelse(Jan.IR > quantile(Jan.IR, probs=.75), "High",
+                                                ifelse(Jan.IR < quantile(Jan.IR, probs=.25), "Low",
+                                                       "Med"))), ref="Low")) %>%
+  dplyr::select(Date.x, city, adj_case_14day_rate.x, 
+                Vax.percent, Jan.IR.cat, 
+                HouseholdIncome.cat, CityHispanic.cat, CityBlack.cat, 
+                CityAsian.cat, CityAgeOld.cat, CityAgeYoung.cat)
+
+
+
+
+test <- dout %>% 
+  # dplyr::filter(Date.x > "2021-03-01") %>% 
+  tidyr::nest(data = -Date.x) %>% 
+  dplyr::mutate(fit = purrr::map(data, ~lm(adj_case_14day_rate.x ~ Vax.percent + Jan.IR.cat + HouseholdIncome.cat+CityHispanic.cat+CityBlack.cat+ CityAsian.cat+ CityAgeOld.cat+ CityAgeYoung.cat, data = .x)),
+                tidied = purrr::map(fit, ~broom::tidy(.x), quality = purrr::map(fit, ~glance(.x)))) %>% 
+  dplyr::select(-data, -fit) %>% 
+  tidyr::unnest(tidied) %>% 
+  # dplyr::filter(grepl("Vax", term)) %>%
+  arrange(Date.x)
+
+
+
+# Vaccination rates ---- 
+# after april 2021 (vaccination rates too low prior)
+p1 <- ggplot(test %>% filter(grepl("Vax.percent", term), Date.x > "2021-04-01"), aes(Date.x, estimate)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) +
+  geom_hline(yintercept = 0) + theme_bw() + theme(legend.position = c(0.8, 0.8))
+  # geom_line(data = lac_summarytable_dash %>% filter(city == "Los Angeles County"), aes(Date, adj_case_14day_rate))
+
+p2 <- ggplot(lac_summarytable_dash %>% 
+               filter(city == "Los Angeles County", 
+                      Date > "2021-04-01") %>% 
+               mutate(Date = ymd(Date)), aes(Date, adj_case_14day_rate)) +
+  geom_line()
+
+plot_grid(p1, p2, ncol = 1, align = 'v')
+
+
+```
+
+### Race
+```{r, warning=F}
+
+p1 <- ggplot(test %>% filter(term %in% c("CityAsian.catHigh", "CityBlack.catHigh", "CityHispanic.catHigh")), aes(Date.x, estimate)) + 
+  geom_point(aes(colour = term)) + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error, colour = term)) +
+  geom_hline(yintercept = 0) + theme_bw() + theme(legend.position = c(0.8, 0.8))
+
+p2 <- ggplot(lac_summarytable_dash %>% 
+               filter(city == "Los Angeles County") %>% 
+               mutate(Date = ymd(Date)), aes(Date, adj_case_14day_rate)) +
+  geom_line()
+
+plot_grid(p1, p2, ncol = 1, align = 'v')
+
+```
+
+
+### Household income
+```{r}
+p1 <- ggplot(test %>% filter(term %in% c("HouseholdIncome.catHigh", "HouseholdIncome.catLow")), aes(Date.x, estimate)) + 
+  geom_point(aes(colour = term)) + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error, colour = term)) +
+  geom_hline(yintercept = 0) + theme_bw() + theme(legend.position = c(0.8, 0.2))
+
+p2 <- ggplot(lac_summarytable_dash %>% 
+               filter(city == "Los Angeles County") %>% 
+               mutate(Date = ymd(Date)), aes(Date, adj_case_14day_rate)) +
+  geom_line()
+
+plot_grid(p1, p2, ncol = 1, align = 'v')
+
+```
+
+
+
+### Age category
+```{r}
+p1 <- ggplot(test %>% filter(term %in% c("CityAgeOld.catHigh", "CityAgeYoung.catHigh")), aes(Date.x, estimate)) + 
+  geom_point(aes(colour = term)) + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error, colour = term)) +
+  geom_hline(yintercept = 0) + theme_bw() + theme(legend.position = c(0.8, 0.8))
+
+p2 <- ggplot(lac_summarytable_dash %>% 
+               filter(city == "Los Angeles County") %>% 
+               mutate(Date = ymd(Date)), aes(Date, adj_case_14day_rate)) +
+  geom_line()
+
+plot_grid(p1, p2, ncol = 1, align = 'v')
+
+```
+
+
+### January incidence rates
+```{r}
+
+p1 <- ggplot(test %>% filter(term %in% c("Jan.IR.catHigh", "Jan.IR.catMed")), aes(Date.x, estimate)) + 
+  geom_point(aes(colour = term)) + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error, colour = term)) +
+  geom_hline(yintercept = 0) + theme_bw() + theme(legend.position = c(0.8, 0.8))
+# geom_line(data = lac_summarytable_dash %>% filter(city == "Los Angeles County"), aes(Date, adj_case_14day_rate))
+# ggsave(p1, width = 10, height = 8, file = "~/Desktop/test1.png")
+p2 <- ggplot(lac_summarytable_dash %>% 
+               filter(city == "Los Angeles County") %>% 
+               mutate(Date = ymd(Date)), aes(Date, adj_case_14day_rate)) +
+  geom_line()
+
+plot_grid(p1, p2, ncol = 1, align = 'v')
+
+```
+
+
+
+
